@@ -1,50 +1,60 @@
 import sqlite3
 import pandas as pd
 import os
+import zipfile
+import urllib.request
 
 DB_PATH = "database/olist.db"
 
+
 def build_database():
+
+    # ✅ Create folders
+    if not os.path.exists("database"):
+        os.makedirs("database")
+
+    if not os.path.exists("data"):
+        os.makedirs("data")
+
+    zip_path = "data/olist.zip"
+
+    # ✅ Download dataset if not exists
+    if not os.path.exists(zip_path):
+        print("Downloading dataset...")
+        url = "https://github.com/olist/work-at-olist-data/raw/master/datasets/olist_public_dataset.zip"
+        urllib.request.urlretrieve(url, zip_path)
+
+        print("Extracting dataset...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall("data")
+
     conn = sqlite3.connect(DB_PATH)
 
     print("Building database...")
 
-    # Load datasets
-    customers = pd.read_csv("data/olist_customers_dataset.csv")
-    geolocation = pd.read_csv("data/olist_geolocation_dataset.csv")
-    order_items = pd.read_csv("data/olist_order_items_dataset.csv")
-    payments = pd.read_csv("data/olist_order_payments_dataset.csv")
-    reviews = pd.read_csv("data/olist_order_reviews_dataset.csv")
-    orders = pd.read_csv("data/olist_orders_dataset.csv")
-    products = pd.read_csv("data/olist_products_dataset.csv")
-    sellers = pd.read_csv("data/olist_sellers_dataset.csv")
-    category_translation = pd.read_csv("data/product_category_name_translation.csv")
+    # ✅ Auto load ALL CSVs
+    for file in os.listdir("data"):
+        if file.endswith(".csv"):
+            file_path = os.path.join("data", file)
+            df = pd.read_csv(file_path)
 
-    # Store in SQLite
-    customers.to_sql("customers", conn, if_exists="replace", index=False)
-    geolocation.to_sql("geolocation", conn, if_exists="replace", index=False)
-    order_items.to_sql("order_items", conn, if_exists="replace", index=False)
-    payments.to_sql("payments", conn, if_exists="replace", index=False)
-    reviews.to_sql("reviews", conn, if_exists="replace", index=False)
-    orders.to_sql("orders", conn, if_exists="replace", index=False)
-    products.to_sql("products", conn, if_exists="replace", index=False)
-    sellers.to_sql("sellers", conn, if_exists="replace", index=False)
-    category_translation.to_sql("category_translation", conn, if_exists="replace", index=False)
+            table_name = file.replace(".csv", "")
+            df.to_sql(table_name, conn, if_exists="replace", index=False)
 
     conn.close()
     print("Database built successfully!")
 
+
 def get_connection():
     return sqlite3.connect(DB_PATH)
+
 
 def get_schema():
     conn = get_connection()
     cursor = conn.cursor()
 
-    tables = [
-        "customers", "geolocation", "order_items", "payments",
-        "reviews", "orders", "products", "sellers", "category_translation"
-    ]
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = [t[0] for t in cursor.fetchall()]
 
     schema = {}
 
@@ -54,7 +64,3 @@ def get_schema():
 
     conn.close()
     return schema
-
-
-if __name__ == "__main__":
-    build_database()
