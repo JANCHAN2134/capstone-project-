@@ -1,22 +1,29 @@
 import sqlite3
 import os
-import urllib.request
+import requests
 
 DB_PATH = "database/olist.db"
+
 
 def build_database():
     if not os.path.exists("database"):
         os.makedirs("database")
 
-    # If DB already exists → skip
-    if os.path.exists(DB_PATH):
+    # If DB already exists and valid → skip
+    if os.path.exists(DB_PATH) and os.path.getsize(DB_PATH) > 1000000:
         print("Database already exists ✅")
         return
 
     print("Downloading database...")
 
     url = "https://drive.google.com/uc?export=download&id=1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_"
-    urllib.request.urlretrieve(url, DB_PATH)
+
+    response = requests.get(url, stream=True)
+
+    with open(DB_PATH, "wb") as f:
+        for chunk in response.iter_content(1024):
+            if chunk:
+                f.write(chunk)
 
     print("Database downloaded ✅")
 
