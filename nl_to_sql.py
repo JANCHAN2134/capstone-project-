@@ -16,17 +16,15 @@ def call_llm(prompt):
             "Content-Type": "application/json"
         },
         json={
-            "model": "mistralai/mistral-7b-instruct",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
+            "model": "openai/gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": prompt}]
         }
     )
 
     data = response.json()
 
     if "choices" not in data:
-        raise Exception(f"API Error: {data}")
+        raise Exception(data)
 
     return data["choices"][0]["message"]["content"]
 
@@ -39,9 +37,7 @@ def generate_sql(user_query):
     schema = get_schema()
 
     prompt = f"""
-You are an expert SQL generator.
-
-Convert the question into SQLite SQL.
+Convert this question into SQLite SQL.
 
 Schema:
 {schema}
@@ -49,10 +45,10 @@ Schema:
 Glossary:
 {GLOSSARY}
 
-Return only SQL.
-
 Question:
 {user_query}
+
+Return only SQL.
 """
 
     return call_llm(prompt)
@@ -66,11 +62,7 @@ def run_sql(query):
 
 
 def generate_summary(df):
-    prompt = f"""
-Summarize this data:
-
-{df.head(10).to_string()}
-"""
+    prompt = f"Summarize this:\n{df.head(10).to_string()}"
     return call_llm(prompt)
 
 
