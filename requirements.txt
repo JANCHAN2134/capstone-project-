@@ -3,3 +3,4 @@ plotly
 streamlit
 python-dotenv
 anthropic
+matplotlib
