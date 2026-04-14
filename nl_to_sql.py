@@ -1,5 +1,3 @@
-import os
-import sqlite3
 import pandas as pd
 import requests
 import streamlit as st
@@ -7,8 +5,7 @@ import streamlit as st
 from db_utils import get_connection, get_schema
 from schema_glossary import GLOSSARY
 
-# Get API key from Streamlit secrets
-OPENROUTER_API_KEY = st.secrets["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"]
+OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
 
 
 def call_llm(prompt):
@@ -35,8 +32,7 @@ def call_llm(prompt):
 
 
 def clean_sql(sql):
-    sql = sql.replace("```sql", "").replace("```", "").strip()
-    return sql
+    return sql.replace("```sql", "").replace("```", "").strip()
 
 
 def generate_sql(user_query):
@@ -45,7 +41,7 @@ def generate_sql(user_query):
     prompt = f"""
 You are an expert SQL generator.
 
-Convert the following question into SQLite SQL.
+Convert the question into SQLite SQL.
 
 Schema:
 {schema}
@@ -53,10 +49,7 @@ Schema:
 Glossary:
 {GLOSSARY}
 
-Rules:
-- Use correct joins
-- Only use given columns
-- Return only SQL
+Return only SQL.
 
 Question:
 {user_query}
@@ -74,11 +67,10 @@ def run_sql(query):
 
 def generate_summary(df):
     prompt = f"""
-Summarize this data in simple business terms:
+Summarize this data:
 
 {df.head(10).to_string()}
 """
-
     return call_llm(prompt)
 
 
@@ -88,16 +80,8 @@ def process_query(user_query):
     try:
         df = run_sql(sql)
     except Exception as e:
-        return sql, None, f"Error: {e}"
+        return sql, None, str(e)
 
     summary = generate_summary(df)
 
     return sql, df, summary
-
-
-if __name__ == "__main__":
-    sql, df, summary = process_query("Top 5 states by revenue")
-
-    print(sql)
-    print(df.head())
-    print(summary)
