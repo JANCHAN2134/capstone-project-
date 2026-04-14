@@ -18,7 +18,7 @@ def call_llm(prompt):
             "X-Title": "QueryMind BI"
         },
         json={
-            "model": "mistralai/mistral-7b-instruct:free",
+            "model": "openchat/openchat-3.5-0106",
             "messages": [
                 {"role": "user", "content": prompt}
             ]
