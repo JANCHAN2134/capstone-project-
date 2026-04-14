@@ -36,7 +36,7 @@ if query:
     st.subheader("📊 Visualization")
     fig = plot_data(df)
     if fig:
-        st.plotly_chart(fig, use_container_width=True)
+        st.pyplot(fig)
     else:
         st.write("No suitable chart for this data")
 
