@@ -24,7 +24,7 @@ def call_llm(prompt):
     data = response.json()
 
     if "choices" not in data:
-        raise Exception(data)
+        raise Exception(f"API Error: {data}")
 
     return data["choices"][0]["message"]["content"]
 
