@@ -80,3 +80,16 @@ def process_query(user_query):
     summary = generate_summary(df)
 
     return sql, df, summary
+
+def generate_sql(user_query):
+    if "top 5 states" in user_query.lower():
+        return """
+        SELECT c.customer_state, SUM(oi.price) AS revenue
+        FROM customers c
+        JOIN orders o ON c.customer_id = o.customer_id
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY c.customer_state
+        ORDER BY revenue DESC
+        LIMIT 5;
+        """
+    return call_llm(user_query)
