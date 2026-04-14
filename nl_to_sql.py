@@ -18,7 +18,7 @@ def call_llm(prompt):
             "X-Title": "QueryMind BI"
         },
         json={
-            "model": "mistralai/mistral-7b-instruct",
+            "model": "mistralai/mistral-7b-instruct:free",
             "messages": [
                 {"role": "user", "content": prompt}
             ]
