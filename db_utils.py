@@ -21,7 +21,7 @@ def build_database():
     # ✅ Download dataset if not exists
     if not os.path.exists(zip_path):
         print("Downloading dataset...")
-        url = "https://github.com/olist/work-at-olist-data/raw/master/datasets/olist_public_dataset.zip"
+        url = "https://storage.googleapis.com/dataset-uploader/olist/olist_public_dataset.zip"
         urllib.request.urlretrieve(url, zip_path)
 
         print("Extracting dataset...")
