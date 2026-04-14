@@ -14,11 +14,11 @@ def call_llm(prompt):
         headers={
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://streamlit.app",  # REQUIRED
-            "X-Title": "QueryMind BI"                # REQUIRED
+            "HTTP-Referer": "https://streamlit.app",
+            "X-Title": "QueryMind BI"
         },
         json={
-            "model": "openai/gpt-3.5-turbo",
+            "model": "mistralai/mistral-7b-instruct",
             "messages": [
                 {"role": "user", "content": prompt}
             ]
@@ -26,8 +26,6 @@ def call_llm(prompt):
     )
 
     data = response.json()
-
-    print(data)  # 👈 IMPORTANT (debug)
 
     if "choices" not in data:
         return f"API Error: {data}"
