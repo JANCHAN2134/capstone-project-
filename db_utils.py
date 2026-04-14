@@ -1,48 +1,31 @@
 import sqlite3
-import pandas as pd
 import os
-import zipfile
-import urllib.request
+import requests
 
 DB_PATH = "database/olist.db"
 
+FILE_ID = "PASTE_YOUR_FILE_ID_HERE"
 
-def build_database():
 
-    # ✅ Create folders
+def download_db():
     if not os.path.exists("database"):
         os.makedirs("database")
 
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    if not os.path.exists(DB_PATH):
+        print("Downloading database...")
 
-    zip_path = "data/olist.zip"
+        url = f"https://drive.google.com/uc?export=download&id={1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_}"
 
-    # ✅ Download dataset if not exists
-    if not os.path.exists(zip_path):
-        print("Downloading dataset...")
-        url = "https://storage.googleapis.com/dataset-uploader/olist/olist_public_dataset.zip"
-        urllib.request.urlretrieve(url, zip_path)
+        response = requests.get(url)
 
-        print("Extracting dataset...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall("data")
+        with open(DB_PATH, "wb") as f:
+            f.write(response.content)
 
-    conn = sqlite3.connect(DB_PATH)
+        print("Download complete!")
 
-    print("Building database...")
 
-    # ✅ Auto load ALL CSVs
-    for file in os.listdir("data"):
-        if file.endswith(".csv"):
-            file_path = os.path.join("data", file)
-            df = pd.read_csv(file_path)
-
-            table_name = file.replace(".csv", "")
-            df.to_sql(table_name, conn, if_exists="replace", index=False)
-
-    conn.close()
-    print("Database built successfully!")
+def build_database():
+    download_db()
 
 
 def get_connection():
