@@ -5,43 +5,27 @@ import requests
 DB_PATH = "database/olist.db"
 
 
-import sqlite3
-import os
-import requests
-
-DB_PATH = "database/olist.db"
-
-
 def build_database():
     if not os.path.exists("database"):
         os.makedirs("database")
 
-    # Skip if already downloaded
+    # Skip if already exists
     if os.path.exists(DB_PATH) and os.path.getsize(DB_PATH) > 1000000:
         print("Database already exists ✅")
         return
 
     print("Downloading database...")
 
-    file_id = "1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_"
-    url = "https://drive.google.com/uc?export=download"
+    url = "https://github.com/JANCHAN2134/capstone-project-/releases/download/v1.0/olist.db"
 
-    session = requests.Session()
+    response = requests.get(url, stream=True)
 
-    response = session.get(url, params={"id": file_id}, stream=True)
-
-    # Handle Google Drive confirmation
-    for key, value in response.cookies.items():
-        if key.startswith("download_warning"):
-            response = session.get(url, params={"id": file_id, "confirm": value}, stream=True)
-
-    # Save file
     with open(DB_PATH, "wb") as f:
-        for chunk in response.iter_content(8192):
+        for chunk in response.iter_content(1024):
             if chunk:
                 f.write(chunk)
 
-    print("Database downloaded ✅")
+    print("Database ready ✅")
 
 
 def get_connection():
