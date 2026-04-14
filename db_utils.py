@@ -12,11 +12,18 @@ def download_db():
         os.makedirs("database")
 
     if not os.path.exists(DB_PATH):
+        print("Downloading database...")
+
         url = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
-        response = requests.get(url)
+
+        response = requests.get(url, stream=True)
 
         with open(DB_PATH, "wb") as f:
-            f.write(response.content)
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        print("Download complete!")
 
 
 def build_database():
