@@ -13,21 +13,26 @@ def call_llm(prompt):
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://streamlit.app",  # REQUIRED
+            "X-Title": "QueryMind BI"                # REQUIRED
         },
         json={
             "model": "openai/gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
         }
     )
 
     data = response.json()
 
+    print(data)  # 👈 IMPORTANT (debug)
+
     if "choices" not in data:
-        raise Exception(f"API Error: {data}")
+        return f"API Error: {data}"
 
     return data["choices"][0]["message"]["content"]
-
 
 def clean_sql(sql):
     return sql.replace("```sql", "").replace("```", "").strip()
