@@ -8,18 +8,21 @@ FILE_ID = "1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_"
 
 
 def download_db():
+    import os
+    import requests
+
     if not os.path.exists("database"):
         os.makedirs("database")
 
     if not os.path.exists(DB_PATH):
         print("Downloading database...")
 
-        url = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
+        url = "https://drive.google.com/uc?export=download&id=1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_"
 
         response = requests.get(url, stream=True)
 
         with open(DB_PATH, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(8192):
                 if chunk:
                     f.write(chunk)
 
