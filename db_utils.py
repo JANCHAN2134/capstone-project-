@@ -4,7 +4,7 @@ import requests
 
 DB_PATH = "database/olist.db"
 
-FILE_ID = "PASTE_YOUR_FILE_ID_HERE"
+FILE_ID = "1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_"
 
 
 def download_db():
@@ -12,16 +12,11 @@ def download_db():
         os.makedirs("database")
 
     if not os.path.exists(DB_PATH):
-        print("Downloading database...")
-
-        url = f"https://drive.google.com/uc?export=download&id={1WjBYraA9QB5nD18ZMdQfWFTi9KD-ArC_}"
-
+        url = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
         response = requests.get(url)
 
         with open(DB_PATH, "wb") as f:
             f.write(response.content)
-
-        print("Download complete!")
 
 
 def build_database():
