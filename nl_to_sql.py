@@ -65,8 +65,10 @@ def run_sql(query):
 
 
 def generate_summary(df):
-    prompt = f"Summarize this:\n{df.head(10).to_string()}"
-    return call_llm(prompt)
+    if df is None or df.empty:
+        return "No data found."
+
+    return f"Showing {len(df)} records based on your query."
 
 
 def process_query(user_query):
@@ -80,9 +82,10 @@ def process_query(user_query):
     summary = generate_summary(df)
 
     return sql, df, summary
-
 def generate_sql(user_query):
-    if "top 5 states" in user_query.lower():
+    q = user_query.lower()
+
+    if "top 5 states" in q and "revenue" in q:
         return """
         SELECT c.customer_state, SUM(oi.price) AS revenue
         FROM customers c
@@ -92,4 +95,37 @@ def generate_sql(user_query):
         ORDER BY revenue DESC
         LIMIT 5;
         """
-    return call_llm(user_query)
+
+    elif "top 5 orders" in q and "revenue" in q:
+        return """
+        SELECT o.order_id, SUM(oi.price) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY o.order_id
+        ORDER BY revenue DESC
+        LIMIT 5;
+        """
+
+    elif "top customers" in q:
+        return """
+        SELECT c.customer_id, SUM(oi.price) AS total_spent
+        FROM customers c
+        JOIN orders o ON c.customer_id = o.customer_id
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY c.customer_id
+        ORDER BY total_spent DESC
+        LIMIT 10;
+        """
+
+    elif "monthly revenue" in q:
+        return """
+        SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS month,
+               SUM(oi.price) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY month
+        ORDER BY month;
+        """
+
+    # fallback simple query
+    return "SELECT * FROM customers LIMIT 5;"
