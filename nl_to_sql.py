@@ -1,32 +1,17 @@
 import os
 import sqlite3
 import pandas as pd
-from dotenv import load_dotenv
 import requests
+import streamlit as st
 
 from db_utils import get_connection, get_schema
 from schema_glossary import GLOSSARY
 
-# Load environment variables
-load_dotenv()
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# Get API key from Streamlit secrets
+OPENROUTER_API_KEY = st.secrets["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"]
 
 
-# 🔹 Clean SQL (removes ```sql formatting)
-def clean_sql(sql):
-    sql = sql.strip()
-
-    if sql.startswith("```"):
-        sql = sql.replace("```sql", "").replace("```", "").strip()
-
-    return sql
-
-
-# 🔹 LLM Call Function
 def call_llm(prompt):
-    print("Calling LLM...")
-
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
@@ -34,12 +19,11 @@ def call_llm(prompt):
             "Content-Type": "application/json"
         },
         json={
-            "model": "openai/gpt-3.5-turbo",
+            "model": "mistralai/mistral-7b-instruct",
             "messages": [
                 {"role": "user", "content": prompt}
             ]
-        },
-        timeout=30
+        }
     )
 
     data = response.json()
@@ -50,37 +34,37 @@ def call_llm(prompt):
     return data["choices"][0]["message"]["content"]
 
 
-# 🔹 Generate SQL
+def clean_sql(sql):
+    sql = sql.replace("```sql", "").replace("```", "").strip()
+    return sql
+
+
 def generate_sql(user_query):
     schema = get_schema()
 
     prompt = f"""
 You are an expert SQL generator.
 
-Convert the following natural language question into a valid SQLite SQL query.
+Convert the following question into SQLite SQL.
 
-Database Schema:
+Schema:
 {schema}
 
 Glossary:
 {GLOSSARY}
 
 Rules:
-- Use only the tables and columns provided
-- Use proper JOINs where needed
-- customer_state is in customers table, NOT orders
-- Join orders and customers using customer_id
-- Revenue = SUM(order_items.price)
-- Return ONLY SQL (no explanation)
+- Use correct joins
+- Only use given columns
+- Return only SQL
 
 Question:
 {user_query}
 """
 
-    return call_llm(prompt).strip()
+    return call_llm(prompt)
 
 
-# 🔹 Run SQL
 def run_sql(query):
     conn = get_connection()
     df = pd.read_sql_query(query, conn)
@@ -88,66 +72,32 @@ def run_sql(query):
     return df
 
 
-# 🔹 Fix SQL if error
-def fix_sql(bad_query, error):
-    prompt = f"""
-The following SQL query is incorrect.
-
-Query:
-{bad_query}
-
-Error:
-{error}
-
-Fix the query using correct relationships:
-- customer_state is in customers table
-- orders must join customers using customer_id
-- revenue comes from order_items.price
-
-Return ONLY corrected SQL.
-"""
-
-    return call_llm(prompt).strip()
-
-
-# 🔹 Generate summary
 def generate_summary(df):
     prompt = f"""
-Summarize the following data in simple business language:
+Summarize this data in simple business terms:
 
 {df.head(10).to_string()}
-
-Keep it short and clear.
 """
 
-    return call_llm(prompt).strip()
+    return call_llm(prompt)
 
 
-# 🔹 Main pipeline
 def process_query(user_query):
     sql = clean_sql(generate_sql(user_query))
 
     try:
         df = run_sql(sql)
     except Exception as e:
-        sql = clean_sql(fix_sql(sql, str(e)))
-        df = run_sql(sql)
+        return sql, None, f"Error: {e}"
 
     summary = generate_summary(df)
 
     return sql, df, summary
 
 
-# 🔹 Test
 if __name__ == "__main__":
-    query = "Top 5 states by revenue"
-    sql, df, summary = process_query(query)
+    sql, df, summary = process_query("Top 5 states by revenue")
 
-    print("Generated SQL:")
     print(sql)
-
-    print("\nResult:")
     print(df.head())
-
-    print("\nSummary:")
     print(summary)
