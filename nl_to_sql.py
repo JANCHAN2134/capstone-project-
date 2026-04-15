@@ -91,11 +91,76 @@ def run_sql(query):
 
 
 # ---------- SUMMARY ----------
-def generate_summary(df):
-    if df is None or df.empty:
-        return "No data found."
+def generate_sql(user_query):
+    schema = get_schema()
 
-    return f"Showing {len(df)} records based on your query."
+    prompt = f"""
+Convert this question into SQLite SQL.
+
+Schema:
+{schema}
+
+Glossary:
+{GLOSSARY}
+
+Return only SQL.
+
+Question:
+{user_query}
+"""
+
+    # 🔹 Try LLM
+    sql = call_llm(prompt)
+
+    if sql and "select" in sql.lower():
+        return clean_sql(sql)
+
+    # 🔹 FALLBACK (SMART)
+    q = user_query.lower()
+
+    if "state" in q or "region" in q:
+        return """
+        SELECT c.customer_state, SUM(oi.price) AS revenue
+        FROM customers c
+        JOIN orders o ON c.customer_id = o.customer_id
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY c.customer_state
+        ORDER BY revenue DESC
+        LIMIT 5;
+        """
+
+    elif "customer" in q or "buyer" in q:
+        return """
+        SELECT c.customer_id, SUM(oi.price) AS total_spent
+        FROM customers c
+        JOIN orders o ON c.customer_id = o.customer_id
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY c.customer_id
+        ORDER BY total_spent DESC
+        LIMIT 10;
+        """
+
+    elif "order" in q:
+        return """
+        SELECT o.order_id, SUM(oi.price) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY o.order_id
+        ORDER BY revenue DESC
+        LIMIT 5;
+        """
+
+    elif "month" in q or "trend" in q:
+        return """
+        SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS month,
+               SUM(oi.price) AS revenue
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        GROUP BY month
+        ORDER BY month;
+        """
+
+    return "SELECT * FROM orders LIMIT 10;"
 
 
 # ---------- MAIN PIPELINE ----------
