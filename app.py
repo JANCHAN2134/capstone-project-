@@ -9,7 +9,6 @@ if not os.path.exists("database/olist.db"):
     build_database()
 
 st.set_page_config(page_title="QueryMind BI", layout="wide")
-
 st.title("📊 QueryMind BI")
 st.subheader("Ask questions in natural language")
 
@@ -31,14 +30,18 @@ if query:
     st.code(sql, language="sql")
 
     st.subheader("📋 Result")
-    st.dataframe(df)
+    # BUG FIX: Guard against None df (e.g. when SQL fails)
+    if df is not None and not df.empty:
+        st.dataframe(df)
 
-    st.subheader("📊 Visualization")
-    fig = plot_data(df)
-    if fig:
-        st.pyplot(fig)
+        st.subheader("📊 Visualization")
+        fig = plot_data(df)
+        if fig:
+            st.pyplot(fig)
+        else:
+            st.write("No suitable chart for this data.")
     else:
-        st.write("No suitable chart for this data")
+        st.warning("No data returned. The query may have failed or returned empty results.")
 
     st.subheader("💡 Summary")
     st.write(summary)
