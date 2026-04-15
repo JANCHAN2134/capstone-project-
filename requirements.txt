@@ -1,6 +1,6 @@
 pandas
-plotly
 streamlit
-python-dotenv
-anthropic
+requests
 matplotlib
+plotly
+python-dotenv
