@@ -1,6 +1,6 @@
 pandas
 streamlit
 requests
-matplotlib
 plotly
 python-dotenv
+numpy
