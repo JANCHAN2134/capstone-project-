@@ -16,8 +16,8 @@ def format_schema(schema: dict) -> str:
     return "\n".join(lines)
 
 
-# ---------- LLM CALL (raw, with message list) ----------
-def call_llm_messages(messages: list):
+# ---------- LLM CALL ----------
+def call_llm_messages(messages: list, max_tokens: int = 800):
     if not OPENROUTER_API_KEY:
         return None
     try:
@@ -31,7 +31,8 @@ def call_llm_messages(messages: list):
             },
             json={
                 "model": "meta-llama/llama-3-8b-instruct:free",
-                "messages": messages
+                "messages": messages,
+                "max_tokens": max_tokens,
             }
         )
         data = response.json()
@@ -42,6 +43,34 @@ def call_llm_messages(messages: list):
         return None
 
 
+# ---------- INTENT CLASSIFICATION ----------
+def classify_intent(user_query: str) -> str:
+    """
+    Classifies the question into one of four BI intent types:
+    - descriptive  : What happened? (top sales, total orders, etc.)
+    - diagnostic   : Why did it happen? (what caused low ratings, why did sales drop)
+    - prescriptive : What should we do? (recommend actions, best strategy)
+    - predictive   : What will happen? (forecast, predict, next month)
+    """
+    q = user_query.lower()
+
+    # Rule-based fast classification
+    predictive_keywords = ["forecast", "predict", "next month", "next quarter", "next year",
+                           "future", "projection", "trend forecast", "will be", "expected"]
+    prescriptive_keywords = ["should", "recommend", "what to do", "improve", "strategy",
+                              "how to increase", "best way", "suggest", "optimize", "action"]
+    diagnostic_keywords = ["why", "reason", "cause", "because", "explain", "factor",
+                            "impact", "affect", "drove", "correlation"]
+
+    if any(k in q for k in predictive_keywords):
+        return "predictive"
+    if any(k in q for k in prescriptive_keywords):
+        return "prescriptive"
+    if any(k in q for k in diagnostic_keywords):
+        return "diagnostic"
+    return "descriptive"
+
+
 # ---------- CLEAN SQL ----------
 def clean_sql(sql):
     if not sql:
@@ -49,14 +78,18 @@ def clean_sql(sql):
     return sql.replace("```sql", "").replace("```", "").strip()
 
 
-# ---------- GENERATE SQL (with conversational memory) ----------
-def generate_sql(user_query, chat_history=None):
-    """
-    chat_history: list of dicts {question, sql, summary}
-    Passes the last 4 turns as context so the LLM can handle
-    follow-up queries like "now filter by Maharashtra".
-    """
+# ---------- GENERATE SQL ----------
+def generate_sql(user_query, chat_history=None, intent=None):
     schema = format_schema(get_schema())
+
+    # Enrich prompt based on intent
+    intent_hint = ""
+    if intent == "diagnostic":
+        intent_hint = "\nThe user wants to understand WHY something happened. Include relevant breakdowns, comparisons, or correlated columns that explain the pattern."
+    elif intent == "prescriptive":
+        intent_hint = "\nThe user wants actionable data. Focus on metrics that show performance gaps, rankings, or opportunity areas."
+    elif intent == "predictive":
+        intent_hint = "\nThe user wants to forecast trends. Return time-series data ordered by date so a forecasting model can extrapolate it."
 
     system_msg = {
         "role": "system",
@@ -72,13 +105,18 @@ Rules:
 - Use ONLY the tables and columns listed above
 - Use proper JOINs when combining tables
 - Return ONLY the raw SQL — no markdown, no backticks, no explanation
-- If a previous question gives relevant context (e.g. "now show only SP state"), use it to refine the query
+- If the user asks about "revenue", use SUM(oi.price) from order_items as oi
+- If the user asks about "monthly trend", group by strftime('%Y-%m', o.order_purchase_timestamp)
+- If the user asks about "category", join products table on product_id
+- If a previous question gives context (e.g. "now filter by Maharashtra"), refine accordingly
+- Always use aliases to make column names readable
+- Never use columns that don't exist in the schema
+{intent_hint}
 """
     }
 
     messages = [system_msg]
 
-    # Inject last 4 turns of chat history as context
     if chat_history:
         for entry in chat_history[-4:]:
             messages.append({"role": "user",      "content": entry["question"]})
@@ -95,46 +133,65 @@ Rules:
     # ---------- KEYWORD FALLBACK ----------
     q = user_query.lower()
 
-    if "state" in q or "region" in q:
+    if "payment" in q:
         return (
-            "SELECT c.customer_state, SUM(oi.price) AS revenue "
+            "SELECT p.payment_type, COUNT(*) AS usage_count, SUM(p.payment_value) AS total_value "
+            "FROM payments p GROUP BY p.payment_type ORDER BY usage_count DESC;"
+        )
+    elif "review" in q or "rating" in q:
+        return (
+            "SELECT p.product_category_name, ROUND(AVG(r.review_score), 2) AS avg_rating, COUNT(*) AS review_count "
+            "FROM order_reviews r "
+            "JOIN orders o ON r.order_id = o.order_id "
+            "JOIN order_items oi ON o.order_id = oi.order_id "
+            "JOIN products p ON oi.product_id = p.product_id "
+            "WHERE p.product_category_name IS NOT NULL "
+            "GROUP BY p.product_category_name ORDER BY avg_rating DESC LIMIT 10;"
+        )
+    elif "state" in q or "region" in q:
+        return (
+            "SELECT c.customer_state, SUM(oi.price) AS revenue, COUNT(DISTINCT o.order_id) AS orders "
             "FROM customers c "
             "JOIN orders o ON c.customer_id = o.customer_id "
             "JOIN order_items oi ON o.order_id = oi.order_id "
-            "GROUP BY c.customer_state ORDER BY revenue DESC LIMIT 5;"
+            "GROUP BY c.customer_state ORDER BY revenue DESC LIMIT 10;"
         )
     elif "category" in q or "product" in q:
         return (
-            "SELECT p.product_category_name, SUM(oi.price) AS revenue "
+            "SELECT p.product_category_name, SUM(oi.price) AS revenue, COUNT(*) AS items_sold "
             "FROM products p "
             "JOIN order_items oi ON p.product_id = oi.product_id "
+            "WHERE p.product_category_name IS NOT NULL "
             "GROUP BY p.product_category_name ORDER BY revenue DESC LIMIT 10;"
         )
     elif "customer" in q or "buyer" in q:
         return (
-            "SELECT c.customer_id, SUM(oi.price) AS total_spent "
+            "SELECT c.customer_id, c.customer_city, SUM(oi.price) AS total_spent, COUNT(o.order_id) AS orders "
             "FROM customers c "
             "JOIN orders o ON c.customer_id = o.customer_id "
             "JOIN order_items oi ON o.order_id = oi.order_id "
             "GROUP BY c.customer_id ORDER BY total_spent DESC LIMIT 10;"
         )
-    elif "month" in q or "trend" in q:
+    elif "month" in q or "trend" in q or "time" in q:
         return (
             "SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS month, "
-            "SUM(oi.price) AS revenue "
+            "SUM(oi.price) AS revenue, COUNT(DISTINCT o.order_id) AS orders "
             "FROM orders o "
             "JOIN order_items oi ON o.order_id = oi.order_id "
             "GROUP BY month ORDER BY month;"
         )
     elif "order" in q:
         return (
-            "SELECT o.order_id, SUM(oi.price) AS revenue "
-            "FROM orders o "
-            "JOIN order_items oi ON o.order_id = oi.order_id "
-            "GROUP BY o.order_id ORDER BY revenue DESC LIMIT 5;"
+            "SELECT o.order_status, COUNT(*) AS count "
+            "FROM orders o GROUP BY o.order_status ORDER BY count DESC;"
         )
 
-    return "SELECT * FROM orders LIMIT 10;"
+    return (
+        "SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS month, "
+        "SUM(oi.price) AS revenue FROM orders o "
+        "JOIN order_items oi ON o.order_id = oi.order_id "
+        "GROUP BY month ORDER BY month;"
+    )
 
 
 # ---------- RUN SQL ----------
@@ -147,15 +204,11 @@ def run_sql(query):
 
 # ---------- EXPLAIN SQL ----------
 def explain_sql(sql: str) -> str:
-    """
-    Returns a plain-English one-liner explaining what the SQL does.
-    Shown in the UI so users understand the query logic.
-    """
     schema = get_schema()
     tables_used = [t for t in schema.keys() if t.lower() in sql.lower()]
     parts = []
     if tables_used:
-        parts.append(f"Queries **{', '.join(tables_used)}**.")
+        parts.append(f"Queries {', '.join(tables_used)}.")
     if "JOIN" in sql.upper():
         parts.append("Joins related tables together.")
     if "GROUP BY" in sql.upper():
@@ -168,19 +221,27 @@ def explain_sql(sql: str) -> str:
 
 
 # ---------- GENERATE SUMMARY ----------
-def generate_summary(df, user_query=None, chat_history=None):
+def generate_summary(df, user_query=None, chat_history=None, intent=None):
     if df is None or df.empty:
         return "No data returned for this query."
 
     rows = df.shape[0]
     preview = df.head(5).to_string(index=False)
 
+    intent_instruction = {
+        "descriptive":  "Describe WHAT the data shows. Mention top values, totals, and distributions.",
+        "diagnostic":   "Explain WHY these patterns exist. What factors or breakdowns stand out as causes?",
+        "prescriptive": "Focus on actionable insight. What does the data tell the business to do?",
+        "predictive":   "Describe the trend. Is it growing, declining, or stable?",
+    }.get(intent or "descriptive", "Describe what the data shows.")
+
     context_note = ""
     if chat_history and len(chat_history) > 1:
         context_note = f'\nPrevious question: "{chat_history[-2]["question"]}"'
 
-    prompt = f"""You are a business analyst. Write a 2-3 sentence plain English insight from the data below.
-Be specific: mention actual top values, trends, or notable findings.{context_note}
+    prompt = f"""You are a senior business analyst. Write a 2-3 sentence insight from the data below.
+Be specific: mention actual top values, trends, or notable findings.
+{intent_instruction}{context_note}
 
 Current question: "{user_query or ''}"
 
@@ -193,37 +254,73 @@ Only write the insight. No preamble, no formatting."""
     if summary:
         return summary.strip()
 
-    # Fallback stats summary
+    # Fallback
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     lines = [f"Returned {rows} rows."]
     if numeric_cols:
         col = numeric_cols[0]
-        lines.append(
-            f"{col}: total = {df[col].sum():,.2f}, avg = {df[col].mean():,.2f}."
-        )
+        lines.append(f"{col}: total = {df[col].sum():,.2f}, avg = {df[col].mean():,.2f}.")
     return " ".join(lines)
+
+
+# ---------- GENERATE BUSINESS RECOMMENDATIONS ----------
+def generate_recommendations(df, user_query=None, intent=None, summary=None):
+    """
+    Returns 3 actionable business recommendations based on the data and intent.
+    Always generated for prescriptive/diagnostic/descriptive queries.
+    """
+    if df is None or df.empty:
+        return None
+
+    preview = df.head(8).to_string(index=False)
+
+    prompt = f"""You are a senior business strategist analyzing e-commerce data.
+Based on the data below and the user's question, provide exactly 3 concise, actionable business recommendations.
+
+User question: "{user_query or ''}"
+Data insight: "{summary or ''}"
+
+Data:
+{preview}
+
+Rules:
+- Each recommendation must start on a new line
+- Each must be 1-2 sentences, specific and actionable
+- Focus on revenue growth, customer retention, or operational efficiency
+- Do NOT number them, just list them one per line
+- No headers, no preamble
+
+3 recommendations:"""
+
+    recs = call_llm_messages([{"role": "user", "content": prompt}])
+    if recs:
+        lines = [l.strip() for l in recs.strip().split("\n") if l.strip()]
+        return "\n".join(lines[:3])
+
+    # Fallback static recs
+    fallback = {
+        "descriptive":  "Focus marketing spend on your top-performing segment.\nInvestigate underperforming areas for quick wins.\nSet KPI benchmarks based on current top performers.",
+        "diagnostic":   "Address the root cause of the identified underperformance.\nRun A/B tests to validate improvement hypotheses.\nMonitor the flagged segment weekly after any changes.",
+        "prescriptive": "Prioritise the highest-ROI action from this analysis.\nAllocate resources to the top-performing segment first.\nSet a 30-day review milestone to measure impact.",
+    }
+    return fallback.get(intent or "descriptive", fallback["descriptive"])
 
 
 # ---------- MAIN PIPELINE ----------
 def process_query(user_query, chat_history=None):
     """
-    Parameters
-    ----------
-    user_query   : str  — the user's natural language question
-    chat_history : list — previous turns: [{question, sql, summary}, ...]
-
-    Returns
-    -------
-    sql, df, summary, explanation
+    Returns: sql, df, summary, explanation, intent, recommendations
     """
-    sql = generate_sql(user_query, chat_history)
+    intent = classify_intent(user_query)
+    sql    = generate_sql(user_query, chat_history, intent=intent)
 
     try:
         df = run_sql(sql)
     except Exception as e:
-        return sql, None, f"SQL Error: {str(e)}", explain_sql(sql)
+        return sql, None, f"SQL Error: {str(e)}", explain_sql(sql), intent, None
 
-    summary     = generate_summary(df, user_query, chat_history)
-    explanation = explain_sql(sql)
+    summary         = generate_summary(df, user_query, chat_history, intent=intent)
+    explanation     = explain_sql(sql)
+    recommendations = generate_recommendations(df, user_query, intent=intent, summary=summary)
 
-    return sql, df, summary, explanation
+    return sql, df, summary, explanation, intent, recommendations
