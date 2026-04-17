@@ -95,22 +95,20 @@ def generate_sql(user_query, chat_history=None, intent=None):
         "role": "system",
         "content": f"""You are an expert SQLite SQL generator for a business intelligence tool.
 
-Database Schema:
+Database Schema (THESE ARE THE ONLY VALID TABLE AND COLUMN NAMES — use them EXACTLY as written):
 {schema}
 
 Glossary (user terms -> SQL meaning):
 {GLOSSARY}
 
-Rules:
-- Use ONLY the tables and columns listed above
-- Use proper JOINs when combining tables
-- Return ONLY the raw SQL — no markdown, no backticks, no explanation
-- If the user asks about "revenue", use SUM(oi.price) from order_items as oi
-- If the user asks about "monthly trend", group by strftime('%Y-%m', o.order_purchase_timestamp)
-- If the user asks about "category", join products table on product_id
-- If a previous question gives context (e.g. "now filter by Maharashtra"), refine accordingly
-- Always use aliases to make column names readable
-- Never use columns that don't exist in the schema
+STRICT RULES — violating any of these will break the app:
+1. ONLY use table names that appear EXACTLY in the schema above. NEVER invent or guess table names.
+2. ONLY use column names that appear EXACTLY under that table in the schema. NEVER invent column names.
+3. If the user asks about "reviews" or "ratings", look at the schema to find the EXACT review table name and use that.
+4. Return ONLY raw SQL — no markdown, no backticks, no explanation, no preamble.
+5. Always use table aliases (e.g. FROM orders o).
+6. Use proper JOINs — always join on the correct foreign keys shown in the schema.
+7. If a previous question gives context (e.g. "now filter by Maharashtra"), refine the query accordingly.
 {intent_hint}
 """
     }
@@ -139,15 +137,34 @@ Rules:
             "FROM payments p GROUP BY p.payment_type ORDER BY usage_count DESC;"
         )
     elif "review" in q or "rating" in q:
-        return (
-            "SELECT p.product_category_name, ROUND(AVG(r.review_score), 2) AS avg_rating, COUNT(*) AS review_count "
-            "FROM order_reviews r "
-            "JOIN orders o ON r.order_id = o.order_id "
-            "JOIN order_items oi ON o.order_id = oi.order_id "
-            "JOIN products p ON oi.product_id = p.product_id "
-            "WHERE p.product_category_name IS NOT NULL "
-            "GROUP BY p.product_category_name ORDER BY avg_rating DESC LIMIT 10;"
+        # Detect actual review table name from schema at runtime
+        schema = get_schema()
+        review_table = next(
+            (t for t in schema.keys() if "review" in t.lower()),
+            None
         )
+        if review_table:
+            score_col = next(
+                (c for c in schema[review_table] if "score" in c.lower()),
+                None
+            )
+            id_col = next(
+                (c for c in schema[review_table] if "order_id" in c.lower()),
+                None
+            )
+            if score_col and id_col:
+                return (
+                    f"SELECT p.product_category_name, "
+                    f"ROUND(AVG(r.{score_col}), 2) AS avg_rating, COUNT(*) AS review_count "
+                    f"FROM {review_table} r "
+                    f"JOIN orders o ON r.{id_col} = o.order_id "
+                    f"JOIN order_items oi ON o.order_id = oi.order_id "
+                    f"JOIN products p ON oi.product_id = p.product_id "
+                    f"WHERE p.product_category_name IS NOT NULL "
+                    f"GROUP BY p.product_category_name ORDER BY avg_rating ASC LIMIT 10;"
+                )
+        # Hard fallback if no review table found at all
+        return "SELECT 'No review table found in database' AS message;"
     elif "state" in q or "region" in q:
         return (
             "SELECT c.customer_state, SUM(oi.price) AS revenue, COUNT(DISTINCT o.order_id) AS orders "
@@ -192,6 +209,51 @@ Rules:
         "JOIN order_items oi ON o.order_id = oi.order_id "
         "GROUP BY month ORDER BY month;"
     )
+
+
+# ---------- VALIDATE SQL AGAINST SCHEMA ----------
+def validate_sql_tables(sql: str) -> tuple[bool, list]:
+    """
+    Checks that every table referenced in the SQL actually exists in the DB schema.
+    Returns (is_valid, list_of_bad_tables).
+    """
+    schema = get_schema()
+    known_tables = {t.lower() for t in schema.keys()}
+
+    import re
+    # Extract table names from FROM and JOIN clauses
+    referenced = re.findall(
+        r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+        sql, re.IGNORECASE
+    )
+    bad = [t for t in referenced if t.lower() not in known_tables]
+    return (len(bad) == 0), bad
+
+
+# ---------- REPAIR BAD SQL ----------
+def repair_sql(sql: str, bad_tables: list, user_query: str) -> str:
+    """
+    If LLM returned SQL with wrong table names, call LLM again with
+    an explicit correction prompt listing valid tables.
+    """
+    schema = format_schema(get_schema())
+    fix_prompt = f"""The following SQL contains table(s) that do NOT exist: {bad_tables}
+
+Bad SQL:
+{sql}
+
+Here is the REAL database schema. Use ONLY these exact table names:
+{schema}
+
+Rewrite the SQL to answer this question correctly using ONLY the real tables above.
+Return ONLY the corrected raw SQL, nothing else.
+
+Question: {user_query}"""
+
+    fixed = call_llm_messages([{"role": "user", "content": fix_prompt}])
+    if fixed:
+        return clean_sql(fixed)
+    return None
 
 
 # ---------- RUN SQL ----------
@@ -314,10 +376,26 @@ def process_query(user_query, chat_history=None):
     intent = classify_intent(user_query)
     sql    = generate_sql(user_query, chat_history, intent=intent)
 
+    # ── Validate SQL tables before executing ──────────────────────────────
+    is_valid, bad_tables = validate_sql_tables(sql)
+    if not is_valid:
+        repaired = repair_sql(sql, bad_tables, user_query)
+        if repaired:
+            sql = repaired
+        else:
+            # Final fallback: use keyword fallback directly
+            sql = generate_sql(user_query, chat_history=None, intent=intent)
+
     try:
         df = run_sql(sql)
     except Exception as e:
-        return sql, None, f"SQL Error: {str(e)}", explain_sql(sql), intent, None
+        # One more attempt: try keyword fallback SQL
+        fallback_sql = generate_sql(user_query, chat_history=None, intent=intent)
+        try:
+            df = run_sql(fallback_sql)
+            sql = fallback_sql
+        except Exception:
+            return sql, None, f"SQL Error: {str(e)}", explain_sql(sql), intent, None
 
     summary         = generate_summary(df, user_query, chat_history, intent=intent)
     explanation     = explain_sql(sql)
